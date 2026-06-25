@@ -5,7 +5,7 @@ export function isPdfAttachment(mime: string) {
 }
 
 export function isMedia(mime: string) {
-  return mime.startsWith("image/") || mime.startsWith("video/") || isPdfAttachment(mime)
+  return mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/") || isPdfAttachment(mime)
 }
 
 export function isImageAttachment(mime: string) {
@@ -14,6 +14,10 @@ export function isImageAttachment(mime: string) {
 
 export function isVideoAttachment(mime: string) {
   return mime.startsWith("video/")
+}
+
+export function isAudioAttachment(mime: string) {
+  return mime.startsWith("audio/")
 }
 
 export function sniffAttachmentMime(bytes: Uint8Array, fallback: string) {
@@ -38,6 +42,19 @@ export function sniffAttachmentMime(bytes: Uint8Array, fallback: string) {
   if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes.subarray(8), [0x41, 0x56, 0x49, 0x20])) {
     return "video/x-msvideo"
   }
+
+  // Audio: WAV — RIFF + "WAVE"
+  if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes.subarray(8), [0x57, 0x41, 0x56, 0x45])) {
+    return "audio/wav"
+  }
+  // Audio: FLAC "fLaC"
+  if (startsWith(bytes, [0x66, 0x4c, 0x61, 0x43])) return "audio/flac"
+  // Audio: OGG "OggS"
+  if (startsWith(bytes, [0x4f, 0x67, 0x67, 0x53])) return "audio/ogg"
+  // Audio: MP3 ID3 tag
+  if (startsWith(bytes, [0x49, 0x44, 0x33])) return "audio/mp3"
+  // Audio: MP3 frame sync (0xFF Ex/Fx)
+  if (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return "audio/mp3"
 
   return fallback
 }
