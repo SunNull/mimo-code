@@ -1,8 +1,6 @@
 import z from "zod"
 import { Effect, Option, Scope } from "effect"
 import { createReadStream } from "fs"
-import { execFileSync } from "child_process"
-import * as os from "node:os"
 import * as path from "path"
 import { createInterface } from "readline"
 import * as Tool from "./tool"
@@ -21,8 +19,7 @@ const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 const MAX_BYTES = 50 * 1024
 const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 const SAMPLE_BYTES = 4096
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024 // 50 MB — matches multimodal video/audio API base64 limit
-const MAX_MEDIA_BYTES = MAX_VIDEO_BYTES
+const MAX_MEDIA_BYTES = 50 * 1024 * 1024 // 50 MB — matches multimodal video/audio base64 API limit
 
 const parameters = z.object({
   file_path: z.string().describe("The absolute path to the file or directory to read"),
@@ -215,36 +212,16 @@ export const ReadTool = Tool.define(
       const isVideo = isVideoAttachment(mime)
       const isAudio = isAudioAttachment(mime)
       if (isImageAttachment(mime) || isPdfAttachment(mime) || isVideo || isAudio) {
-        let mediaPath = filepath
-        let mediaMime = mime
         if ((isVideo || isAudio) && Number(stat.size) > MAX_MEDIA_BYTES) {
-          const ext = isVideo ? "mp4" : "m4a"
-          const outMime = isVideo ? "video/mp4" : "audio/mp4"
-          const out = path.join(
-            os.tmpdir(),
-            `mimocode-media-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`,
+          return yield* Effect.fail(
+            new Error(
+              `${isVideo ? "Video" : "Audio"} file too large: ${(Number(stat.size) / 1024 / 1024).toFixed(1)} MB. ` +
+                `Max supported size is ${MAX_MEDIA_BYTES / 1024 / 1024} MB. ` +
+                `Compress or trim the file and retry.`,
+            ),
           )
-          const args = isVideo
-            ? ["-y", "-i", filepath, "-vf", "scale='min(1280,iw)':-2", "-c:v", "libx264", "-crf", "30", "-preset", "veryfast", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", out]
-            : ["-y", "-i", filepath, "-c:a", "aac", "-b:a", "128k", out]
-          try {
-            execFileSync("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 })
-            mediaPath = out
-            mediaMime = outMime
-          } catch {
-            return yield* Effect.fail(
-              new Error(
-                `${isVideo ? "Video" : "Audio"} file too large: ${(Number(stat.size) / 1024 / 1024).toFixed(1)} MB. ` +
-                  `Max supported size is ${MAX_MEDIA_BYTES / 1024 / 1024} MB and automatic ffmpeg compression failed or ffmpeg is unavailable. ` +
-                  `Compress or trim the file manually and retry.`,
-              ),
-            )
-          }
         }
-        const bytes = yield* fs.readFile(mediaPath)
-        if (mediaPath !== filepath) {
-          try { require("fs").unlinkSync(mediaPath) } catch {}
-        }
+        const bytes = yield* fs.readFile(filepath)
         const msg = isPdfAttachment(mime)
           ? "PDF read successfully"
           : isVideo
@@ -263,8 +240,8 @@ export const ReadTool = Tool.define(
           attachments: [
             {
               type: "file" as const,
-              mime: mediaMime,
-              url: `data:${mediaMime};base64,${Buffer.from(bytes).toString("base64")}`,
+              mime,
+              url: `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`,
             },
           ],
         }
